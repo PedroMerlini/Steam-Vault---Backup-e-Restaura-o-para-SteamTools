@@ -7,7 +7,6 @@ import os
 from .constants import THEME, APP_NAME
 from .config_manager import ConfigManager
 from .engine import VaultEngine
-from .cloud import DriveManager
 
 class VaultWorkerGUI(QThread):
     log = pyqtSignal(str)
@@ -39,6 +38,8 @@ class VaultWorkerGUI(QThread):
         self.finished.emit()
 
 class SteamVaultGUI(QMainWindow):
+    sig_cloud_log = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.config = ConfigManager.load()
@@ -51,10 +52,15 @@ class SteamVaultGUI(QMainWindow):
         self.resize_mode = None
         self.is_maximized = False
         
+        # Lazy Import to avoid potential startup crashes or circular deps
+        from .cloud import DriveManager
         self.drive = DriveManager(self.update_term_cloud)
         
         self.init_ui()
         self.apply_styles()
+        
+        # Connect signal for thread-safe logging
+        self.sig_cloud_log.connect(self.update_term)
 
     def init_ui(self):
         self.main_frame = QFrame()
@@ -149,10 +155,8 @@ class SteamVaultGUI(QMainWindow):
         self.console.verticalScrollBar().setValue(self.console.verticalScrollBar().maximum())
 
     def update_term_cloud(self, text):
-        # Callback for non-qt thread calls (if needed via signal, but here direct ref for simplicity or routed via signal in DriveManager if fully async)
-        # Since DriveManager uses print/callback, we can route it here. 
-        # Ideally should use signal to be thread safe, but for simple logging:
-        self.update_term(text)
+        # Thread-safe logging via Signal
+        self.sig_cloud_log.emit(text)
 
     def apply_styles(self):
         self.setStyleSheet(f"""
@@ -214,10 +218,6 @@ class SteamVaultGUI(QMainWindow):
                 
                 msg.exec()
                 
-                if msg.clickedButton() != btn_sim:
-                    self.update_term("Operação cancelada pelo usuário.")
-                    return
-
                 if msg.clickedButton() != btn_sim:
                     self.update_term("Operação cancelada pelo usuário.")
                     return
