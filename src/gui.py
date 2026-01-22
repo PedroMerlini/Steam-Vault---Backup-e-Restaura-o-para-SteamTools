@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint
 from PyQt6.QtGui import QCursor, QIcon
 import os
-from constants import THEME, APP_NAME
-from config_manager import ConfigManager
-from engine import VaultEngine
+from .constants import THEME, APP_NAME
+from .config_manager import ConfigManager
+from .engine import VaultEngine
 
 class VaultWorkerGUI(QThread):
     log = pyqtSignal(str)
@@ -36,7 +36,11 @@ class SteamVaultGUI(QMainWindow):
         self.setFixedSize(900, 500)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)  # Essential for hover detection
         self.old_pos = None
+        self.resize_margin = 10
+        self.resize_mode = None
+        self.is_maximized = False
         self.init_ui()
         self.apply_styles()
 
@@ -59,6 +63,14 @@ class SteamVaultGUI(QMainWindow):
         top_bar.addLayout(title_box)
         top_bar.addStretch()
         
+        self.btn_min = QPushButton("─"); self.btn_min.setObjectName("BtnMin"); self.btn_min.setFixedSize(30, 30)
+        self.btn_min.clicked.connect(self.showMinimized)
+        top_bar.addWidget(self.btn_min)
+
+        self.btn_max = QPushButton("☐"); self.btn_max.setObjectName("BtnMax"); self.btn_max.setFixedSize(30, 30)
+        self.btn_max.clicked.connect(self.toggle_maximize)
+        top_bar.addWidget(self.btn_max)
+
         self.btn_close = QPushButton("✕"); self.btn_close.setObjectName("BtnClose"); self.btn_close.setFixedSize(30, 30)
         self.btn_close.clicked.connect(self.close)
         top_bar.addWidget(self.btn_close)
@@ -119,6 +131,10 @@ class SteamVaultGUI(QMainWindow):
             QPushButton:hover {{ border-color: {THEME['accent']}; }}
             QPushButton#BtnClose {{ background: transparent; border: none; font-weight: bold; }}
             QPushButton#BtnClose:hover {{ color: {THEME['close_hover']}; }}
+            QPushButton#BtnMin {{ background: transparent; border: none; font-weight: bold; }}
+            QPushButton#BtnMin:hover {{ color: {THEME['text_main']}; background-color: {THEME['btn_border']}; }}
+            QPushButton#BtnMax {{ background: transparent; border: none; font-weight: bold; }}
+            QPushButton#BtnMax:hover {{ color: {THEME['text_main']}; background-color: {THEME['btn_border']}; }}
             QPushButton#BtnPrimary {{ background: {THEME['accent']}; color: white; border: none; font-weight: bold; padding: 12px; }}
             QPushButton#BtnPrimary:hover {{ background: #2563eb; }}
             QPushButton#BtnSecondary {{ border: 1px solid {THEME['accent']}; color: {THEME['accent']}; font-weight: bold; padding: 12px; }}
@@ -141,8 +157,13 @@ class SteamVaultGUI(QMainWindow):
         
         # Check Segurança (Overwrite) com Botoes Customizados
         if mode == "backup":
-            tgt = os.path.join(self.config['backup_path'], "SteamVault_Backup")
-            if os.path.exists(tgt) and os.listdir(tgt):
+            tgt_folder = os.path.join(self.config['backup_path'], "SteamVault_Backup")
+            tgt_zip = os.path.join(self.config['backup_path'], "SteamVault_Backup.zip")
+            
+            exists_folder = os.path.exists(tgt_folder) and os.listdir(tgt_folder)
+            exists_zip = os.path.exists(tgt_zip)
+
+            if exists_folder or exists_zip:
                 # Cria a caixa de mensagem customizada
                 msg = QMessageBox(self)
                 msg.setWindowTitle("Cofre Ocupado")
@@ -165,7 +186,106 @@ class SteamVaultGUI(QMainWindow):
         self.worker = VaultWorkerGUI(mode, self.config['steam_path'], self.config['backup_path'])
         self.worker.log.connect(self.update_term); self.worker.start()
 
-    def mousePressEvent(self, e): self.old_pos = e.globalPosition().toPoint() if e.button() == Qt.MouseButton.LeftButton else None
-    def mouseMoveEvent(self, e): 
-        if self.old_pos: 
-            d = e.globalPosition().toPoint() - self.old_pos; self.move(self.x()+d.x(), self.y()+d.y()); self.old_pos = e.globalPosition().toPoint()
+    
+    def toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+            self.is_maximized = False
+            self.btn_max.setText("☐")
+            self.main_frame.setStyleSheet(f"QFrame#MainFrame {{ background: {THEME['bg_main']}; border: 1px solid {THEME['btn_border']}; border-radius: 8px; }}")
+        else:
+            self.showMaximized()
+            self.is_maximized = True
+            self.btn_max.setText("❐")
+            # Remove border/radius when maximized for cleaner look
+            self.main_frame.setStyleSheet(f"QFrame#MainFrame {{ background: {THEME['bg_main']}; border: none; border-radius: 0px; }}")
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.old_pos = e.globalPosition().toPoint()
+            
+            # Identify resize mode if edges
+            if not self.isMaximized():
+                x = e.position().x()
+                y = e.position().y()
+                w = self.width()
+                h = self.height()
+                m = self.resize_margin
+
+                on_left = x < m
+                on_right = x > w - m
+                on_top = y < m
+                on_bottom = y > h - m
+
+                if on_top and on_left: self.resize_mode = "top_left"
+                elif on_top and on_right: self.resize_mode = "top_right"
+                elif on_bottom and on_left: self.resize_mode = "bottom_left"
+                elif on_bottom and on_right: self.resize_mode = "bottom_right"
+                elif on_left: self.resize_mode = "left"
+                elif on_right: self.resize_mode = "right"
+                elif on_top: self.resize_mode = "top"
+                elif on_bottom: self.resize_mode = "bottom"
+                else: self.resize_mode = None
+            else:
+                self.resize_mode = None
+
+    def mouseReleaseEvent(self, e):
+        self.resize_mode = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseMoveEvent(self, e):
+        # Update Cursor Icon
+        if not self.isMaximized():
+            x = e.position().x()
+            y = e.position().y()
+            w = self.width()
+            h = self.height()
+            m = self.resize_margin
+
+            on_left = x < m
+            on_right = x > w - m
+            on_top = y < m
+            on_bottom = y > h - m
+            
+            if not self.resize_mode: # Only update cursor if not currently dragging
+                if (on_top and on_left) or (on_bottom and on_right): self.setCursor(Qt.CursorShape.FDiagPattern)
+                elif (on_top and on_right) or (on_bottom and on_left): self.setCursor(Qt.CursorShape.BDiagPattern)
+                elif on_left or on_right: self.setCursor(Qt.CursorShape.SizeHorCursor)
+                elif on_top or on_bottom: self.setCursor(Qt.CursorShape.SizeVerCursor)
+                else: self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        # Handle Dragging/Resizing
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            if self.resize_mode:
+                # Resizing logic
+                g = self.geometry()
+                gp = e.globalPosition().toPoint()
+                
+                # Use raw deltas might be better, but simpler to calculate new rect
+                # Note: This simple logic might jitter if not careful with coordinate mapping, 
+                # but standard for manual implementation.
+                
+                if "left" in self.resize_mode:
+                    new_w = g.right() - gp.x()
+                    if new_w > 100: # min width
+                        g.setLeft(gp.x())
+                if "right" in self.resize_mode:
+                    new_w = gp.x() - g.left()
+                    if new_w > 100:
+                        g.setRight(gp.x())
+                if "top" in self.resize_mode:
+                    new_h = g.bottom() - gp.y()
+                    if new_h > 100: # min height
+                        g.setTop(gp.y())
+                if "bottom" in self.resize_mode:
+                    new_h = gp.y() - g.top()
+                    if new_h > 100:
+                        g.setBottom(gp.y())
+                
+                self.setGeometry(g)
+                
+            elif self.old_pos and not self.isMaximized():
+                # Moving Window
+                d = e.globalPosition().toPoint() - self.old_pos
+                self.move(self.x() + d.x(), self.y() + d.y())
+                self.old_pos = e.globalPosition().toPoint()

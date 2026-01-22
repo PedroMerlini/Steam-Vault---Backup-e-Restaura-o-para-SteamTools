@@ -1,7 +1,9 @@
 import os
 import shutil
 import glob
-from constants import APP_NAME, IS_WINDOWS, IS_LINUX
+import zipfile
+import subprocess
+from .constants import APP_NAME, IS_WINDOWS, IS_LINUX, CONFIG_FILE
 
 # --- MOTOR DO COFRE (Lógica Central) ---
 class VaultEngine:
@@ -24,6 +26,25 @@ class VaultEngine:
         except Exception as e:
             self.log(f"[ERRO] Falha: {os.path.basename(src)} - {e}")
         return False
+
+    def sudo_copy(self, src, dst):
+        """Tenta copiar com privilégios elevados se necessário."""
+        try:
+            shutil.copy2(src, dst)
+            return True
+        except PermissionError:
+            self.log(f"[PERMISSÃO] Tentando elevar privilégios para copiar: {os.path.basename(src)}")
+            # Tenta usar pkexec para GUI ou sudo para CLI (mas aqui assumimos GUI flow principal)
+            try:
+                subprocess.check_call(['pkexec', 'cp', src, dst])
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fallback to older gksudo or just fail gracefully
+                self.log(f"[ERRO] Falha de permissão e falha ao elevar privilégios para: {src}")
+                return False
+        except Exception as e:
+            self.log(f"[ERRO] Falha ao copiar {src}: {e}")
+            return False
 
     def copy_module(self, src, dst, title):
         if not os.path.exists(src):
@@ -127,9 +148,45 @@ class VaultEngine:
             
             self.log(f"[SUCESSO] Proton Saves AppID {appid} restaurados.")
 
+
+    def compress_backup(self, src_dir, zip_path):
+        """Compacta o diretório de backup em um arquivo ZIP com alta compressão."""
+        self.log(">>> COMPACTANDO BACKUP (Isso pode demorar)...")
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
+                for root, dirs, files in os.walk(src_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, src_dir)
+                        zipf.write(file_path, arcname)
+            self.log("[SUCESSO] Backup compactado criado com sucesso.")
+            return True
+        except Exception as e:
+            self.log(f"[ERRO] Falha na compactação: {e}")
+            return False
+
+    def extract_backup(self, zip_path, extract_to):
+        """Extrai o backup compactado."""
+        self.log(">>> EXTRAINDO BACKUP...")
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zipf:
+                zipf.extractall(extract_to)
+            self.log("[SUCESSO] Backup extraído.")
+            return True
+        except Exception as e:
+            self.log(f"[ERRO] Falha na extração: {e}")
+            return False
+
     def run_backup(self, steam, backup_root):
-        vault_folder = os.path.join(backup_root, "SteamVault_Backup")
+        # Stage area for backup before compression
+        stage_dir = os.path.join(backup_root, "stage_temp")
+        vault_folder = os.path.join(stage_dir, "SteamVault_Backup")
+        final_zip = os.path.join(backup_root, "SteamVault_Backup.zip")
+
         self.log(f"--- INICIANDO PROTOCOLO {APP_NAME} ---")
+        
+        # Cleanup potential leftovers
+        if os.path.exists(stage_dir): shutil.rmtree(stage_dir)
         self.safe_create_dir(vault_folder)
         
         self.copy_module(os.path.join(steam, "userdata"), os.path.join(vault_folder, "userdata"), "USERDATA")
@@ -145,25 +202,66 @@ class VaultEngine:
                         self.log(f"[DLL] {dll} Protegida.")
         
         if IS_LINUX:
-            self.backup_proton_saves(steam, backup_root)
+            self.backup_proton_saves(steam, stage_dir)
+            
+            # --- SLS STEAM CONFIG BACKUP ---
+            sls_config = os.path.expanduser("~/.config/SLSsteam/config.yaml")
+            if os.path.exists(sls_config):
+                self.log(">>> PROCESSANDO: CONFIGURAÇÃO SLS STEAM...")
+                sls_dest_dir = os.path.join(stage_dir, "SLS_Config")
+                self.safe_create_dir(sls_dest_dir)
+                
+                if self.sudo_copy(sls_config, os.path.join(sls_dest_dir, "config.yaml")):
+                    self.log("[SUCESSO] Configuração SLS arquivada.")
+                else:
+                    self.log("[FALHA] Não foi possível fazer backup do SLS Config.")
+
+        # Backup Config File
+        if os.path.exists(CONFIG_FILE):
+             self.safe_copy(CONFIG_FILE, os.path.join(vault_folder, "vault_config.json"))
+             self.log(f"[CONFIG] {CONFIG_FILE} arquivado.")
+
+        # Compress and Cleanup
+        if self.compress_backup(stage_dir, final_zip):
+            shutil.rmtree(stage_dir)
+        else:
+             self.log("[AVISO] Falha ao compactar. Os arquivos temporários foram mantidos.")
 
     def run_restore(self, steam, backup_root):
-        vault_folder = os.path.join(backup_root, "SteamVault_Backup")
-        origin = vault_folder
+        zip_path = os.path.join(backup_root, "SteamVault_Backup.zip")
+        # Temp dir for extraction
+        temp_extract = os.path.join(backup_root, "restore_temp")
         
-        # Retrocompatibilidade
-        if not os.path.exists(origin):
-            if os.path.exists(os.path.join(backup_root, "SteamBackup")):
-                origin = os.path.join(backup_root, "SteamBackup")
-                self.log("[AVISO] Detectado formato de backup antigo (SteamBackup).")
-
-        if os.path.basename(backup_root) in ["SteamVault_Backup", "SteamBackup"]: 
-            origin = backup_root
+        origin = None
+        is_zip = False
 
         self.log("--- INICIANDO RESTAURAÇÃO DO COFRE ---")
-        
+
+        if os.path.exists(zip_path):
+            self.log("[DETECTADO] Backup Compactado.")
+            if self.extract_backup(zip_path, temp_extract):
+                origin = os.path.join(temp_extract, "SteamVault_Backup")
+                is_zip = True
+            else:
+                return
+        else:
+            # Fallback to legacy folders
+            legacy_1 = os.path.join(backup_root, "SteamVault_Backup")
+            legacy_2 = os.path.join(backup_root, "SteamBackup")
+            
+            if os.path.exists(legacy_1): origin = legacy_1
+            elif os.path.exists(legacy_2): 
+                origin = legacy_2
+                self.log("[AVISO] Backup legado detectado.")
+
+        if not origin or (not os.path.exists(origin)):
+            self.log("[ERRO CRÍTICO] Nenhum backup válido encontrado.")
+            if is_zip: shutil.rmtree(temp_extract)
+            return
+
         if not os.path.exists(os.path.join(origin, "userdata")) and not os.path.exists(os.path.join(origin, "proton_saves")):
             self.log("[ERRO CRÍTICO] O Cofre está vazio ou inválido.")
+            if is_zip: shutil.rmtree(temp_extract)
             return
 
         self.copy_module(os.path.join(origin, "userdata"), os.path.join(steam, "userdata"), "RESTORE USERDATA")
@@ -179,4 +277,29 @@ class VaultEngine:
                         self.log(f"[DLL] {dll} Restaurada.")
         
         if IS_LINUX:
-            self.restore_proton_saves(steam, backup_root)
+            self.restore_proton_saves(steam, os.path.dirname(origin)) # proton logic expects root of backup structure
+            
+            # --- SLS STEAM CONFIG RESTORE ---
+            sls_bkp_file = os.path.join(os.path.dirname(origin), "SLS_Config", "config.yaml")
+            if os.path.exists(sls_bkp_file):
+                self.log(">>> RESTAURANDO: CONFIGURAÇÃO SLS STEAM...")
+                sls_target_dir = os.path.expanduser("~/.config/SLSsteam")
+                sls_target_file = os.path.join(sls_target_dir, "config.yaml")
+                
+                self.safe_create_dir(sls_target_dir)
+                
+                if self.sudo_copy(sls_bkp_file, sls_target_file):
+                    self.log("[SUCESSO] Configuração SLS restaurada.")
+                else:
+                    self.log("[FALHA] Não foi possível restaurar SLS Config (Permissão?).")
+
+        # Restore Config File
+        src_config = os.path.join(origin, "vault_config.json")
+        if os.path.exists(src_config):
+            if self.safe_copy(src_config, CONFIG_FILE):
+                self.log(f"[CONFIG] {CONFIG_FILE} Restaurada.")
+        
+        # Cleanup
+        if is_zip and os.path.exists(temp_extract):
+            shutil.rmtree(temp_extract)
+            self.log("[LIMPEZA] Arquivos temporários removidos.")

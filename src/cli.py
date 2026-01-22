@@ -1,7 +1,7 @@
 import os
-from constants import APP_NAME
-from config_manager import ConfigManager
-from engine import VaultEngine
+from .constants import APP_NAME
+from .config_manager import ConfigManager
+from .engine import VaultEngine
 
 # --- MODO CLI ---
 def run_cli(args):

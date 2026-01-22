@@ -1,6 +1,6 @@
 import os
 import json
-from constants import CONFIG_FILE, DEFAULT_CONFIG
+from .constants import CONFIG_FILE, DEFAULT_CONFIG
 
 # --- GERENCIADOR DE CONFIG ---
 class ConfigManager:
@@ -13,5 +13,10 @@ class ConfigManager:
 
     @staticmethod
     def save(data):
+        # Ensure directory exists if it's a full path
+        directory = os.path.dirname(CONFIG_FILE)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            
         with open(CONFIG_FILE, 'w') as f:
             json.dump(data, f, indent=4)

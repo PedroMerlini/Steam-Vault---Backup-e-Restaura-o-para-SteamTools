@@ -1,5 +1,9 @@
 import platform
 import os
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 # --- DETECÇÃO DE OS ---
 SYSTEM = platform.system()
@@ -9,6 +13,14 @@ IS_LINUX = SYSTEM == "Linux"
 # --- PATHS PADRÃO ---
 def get_default_steam_path():
     if IS_WINDOWS:
+        # Tenta registro primeiro (mais robusto)
+        try:
+            hkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software\\Valve\\Steam")
+            path = winreg.QueryValueEx(hkey, "SteamPath")[0]
+            if os.path.exists(path): return path
+        except:
+            pass
+            
         return r"C:\Program Files (x86)\Steam"
     elif IS_LINUX:
         # Tenta paths comuns linux

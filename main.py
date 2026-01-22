@@ -1,8 +1,7 @@
 import sys
 import argparse
-from constants import APP_NAME
-from setup_utils import install_package
-from cli import run_cli
+from src.constants import APP_NAME
+from src.cli import run_cli
 
 def main():
     parser = argparse.ArgumentParser(description=f"{APP_NAME} Tool")
@@ -15,28 +14,18 @@ def main():
     if args.action:
         run_cli(args)
     else:
-        # Check and install PyQt6 if needed
+        # Check if PyQt6 is available, effectively handled by launcher but good to keep safe
         try:
             from PyQt6.QtWidgets import QApplication
-            GUI_AVAILABLE = True
-        except ImportError:
-            if install_package("PyQt6"):
-                try:
-                    from PyQt6.QtWidgets import QApplication
-                    GUI_AVAILABLE = True
-                except ImportError:
-                    GUI_AVAILABLE = False
-            else:
-                GUI_AVAILABLE = False
-
-        if GUI_AVAILABLE:
-            from gui import SteamVaultGUI
+            from src.gui import SteamVaultGUI
+            
             app = QApplication(sys.argv)
             w = SteamVaultGUI()
             w.show()
             sys.exit(app.exec())
-        else:
-            print("[ERRO] Instale PyQt6 ou use argumentos CLI.")
+        except ImportError:
+            print("[ERRO] PyQt6 não encontrado. Execute através do launcher apropriado.")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
