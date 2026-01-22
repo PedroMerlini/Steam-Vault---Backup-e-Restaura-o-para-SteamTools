@@ -7,16 +7,18 @@ import os
 from .constants import THEME, APP_NAME
 from .config_manager import ConfigManager
 from .engine import VaultEngine
+from .cloud import DriveManager
 
 class VaultWorkerGUI(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal()
-
-    def __init__(self, mode, steam, backup):
+    
+    def __init__(self, mode, steam, backup, drive_mgr=None):
         super().__init__()
         self.mode = mode
         self.steam = steam
         self.backup = backup
+        self.drive_mgr = drive_mgr
         self.engine = VaultEngine(self.emit_log)
 
     def emit_log(self, text):
@@ -25,8 +27,15 @@ class VaultWorkerGUI(QThread):
     def run(self):
         if self.mode == "backup":
             self.engine.run_backup(self.steam, self.backup)
-        else:
+        elif self.mode == "restore":
             self.engine.run_restore(self.steam, self.backup)
+        elif self.mode == "cloud_upload":
+            zip_path = os.path.join(self.backup, "SteamVault_Backup.zip")
+            if self.drive_mgr: self.drive_mgr.upload_file(zip_path)
+        elif self.mode == "cloud_download":
+            dest_path = os.path.join(self.backup, "SteamVault_Backup.zip")
+            if self.drive_mgr: self.drive_mgr.download_latest_backup(dest_path)
+        
         self.finished.emit()
 
 class SteamVaultGUI(QMainWindow):
@@ -41,6 +50,9 @@ class SteamVaultGUI(QMainWindow):
         self.resize_margin = 10
         self.resize_mode = None
         self.is_maximized = False
+        
+        self.drive = DriveManager(self.update_term_cloud)
+        
         self.init_ui()
         self.apply_styles()
 
@@ -90,6 +102,21 @@ class SteamVaultGUI(QMainWindow):
         btn_res = QPushButton("RESTAURAR"); btn_res.setObjectName("BtnSecondary"); btn_res.clicked.connect(lambda: self.run_p("restore"))
         actions.addWidget(btn_bkp); actions.addWidget(btn_res)
         left.addLayout(actions)
+        
+        # --- CLOUD SECTION ---
+        left.addSpacing(10)
+        left.addWidget(QLabel("NUVEM (GOOGLE DRIVE)", styleSheet=f"color:{THEME['accent']}; font-size:10px; font-weight:bold;"))
+        
+        cloud_row = QHBoxLayout(); cloud_row.setSpacing(10)
+        btn_login = QPushButton("LOGIN"); btn_login.setFixedWidth(60); btn_login.setObjectName("BtnSmall")
+        btn_login.clicked.connect(self.cloud_login)
+        
+        btn_up = QPushButton("☁ ENVIAR"); btn_up.setObjectName("BtnCloud"); btn_up.clicked.connect(lambda: self.run_p("cloud_upload"))
+        btn_down = QPushButton("☁ BAIXAR"); btn_down.setObjectName("BtnCloud"); btn_down.clicked.connect(lambda: self.run_p("cloud_download"))
+        
+        cloud_row.addWidget(btn_login); cloud_row.addWidget(btn_up); cloud_row.addWidget(btn_down)
+        left.addLayout(cloud_row)
+
         content.addLayout(left, stretch=4)
 
         # Coluna Direita (Log)
@@ -121,6 +148,12 @@ class SteamVaultGUI(QMainWindow):
         self.console.append(f"<span style='color:{col}'>{text}</span>")
         self.console.verticalScrollBar().setValue(self.console.verticalScrollBar().maximum())
 
+    def update_term_cloud(self, text):
+        # Callback for non-qt thread calls (if needed via signal, but here direct ref for simplicity or routed via signal in DriveManager if fully async)
+        # Since DriveManager uses print/callback, we can route it here. 
+        # Ideally should use signal to be thread safe, but for simple logging:
+        self.update_term(text)
+
     def apply_styles(self):
         self.setStyleSheet(f"""
             QFrame#MainFrame {{ background: {THEME['bg_main']}; border: 1px solid {THEME['btn_border']}; border-radius: 8px; }}
@@ -138,6 +171,8 @@ class SteamVaultGUI(QMainWindow):
             QPushButton#BtnPrimary {{ background: {THEME['accent']}; color: white; border: none; font-weight: bold; padding: 12px; }}
             QPushButton#BtnPrimary:hover {{ background: #2563eb; }}
             QPushButton#BtnSecondary {{ border: 1px solid {THEME['accent']}; color: {THEME['accent']}; font-weight: bold; padding: 12px; }}
+            QPushButton#BtnCloud {{ background: {THEME['btn_bg']}; border: 1px solid {THEME['text_dim']}; color: {THEME['text_dim']}; padding: 8px; font-size: 10px; }}
+            QPushButton#BtnCloud:hover {{ border-color: {THEME['text_main']}; color: {THEME['text_main']}; }}
             QTextEdit#Terminal {{ background: {THEME['bg_panel']}; border: 1px solid {THEME['btn_border']}; color: {THEME['text_main']}; font-family: 'Consolas'; font-size: 11px; padding: 10px; }}
             
             /* Estilo do Popup de Pergunta (QMessageBox) */
@@ -183,8 +218,22 @@ class SteamVaultGUI(QMainWindow):
                     self.update_term("Operação cancelada pelo usuário.")
                     return
 
-        self.worker = VaultWorkerGUI(mode, self.config['steam_path'], self.config['backup_path'])
+                if msg.clickedButton() != btn_sim:
+                    self.update_term("Operação cancelada pelo usuário.")
+                    return
+
+        self.worker = VaultWorkerGUI(mode, self.config['steam_path'], self.config['backup_path'], self.drive)
         self.worker.log.connect(self.update_term); self.worker.start()
+
+    def cloud_login(self):
+        self.update_term(">>> Iniciando Login Google...")
+        # Run in thread to not freeze UI
+        import threading
+        def _auth():
+            if self.drive.authenticate(): pass # Log handled by callback
+        
+        t = threading.Thread(target=_auth)
+        t.start()
 
     
     def toggle_maximize(self):
