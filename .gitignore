@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+.venv/
+ENV/
+
+# Agent/AI tools
+.agent/
+.gemini/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Config local
+.env
+.env.local
+config.json
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Millennium Plugin - development files
+millennium-plugin/node_modules/
+millennium-plugin/dist/
+millennium-plugin/frontend/
+millennium-plugin/types/
+millennium-plugin/package-lock.json
+millennium-plugin/tsconfig.json

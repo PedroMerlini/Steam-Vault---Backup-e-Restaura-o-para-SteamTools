@@ -1,0 +1,10 @@
+{
+        "$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/sys/plugin-schema.json",
+        "name": "steamvault",
+        "common_name": "Steam Vault",
+        "description": "Backup e Restauração de dados do SteamTools",
+        "version": "1.0.1",
+        "include": [
+                "public"
+        ]
+}

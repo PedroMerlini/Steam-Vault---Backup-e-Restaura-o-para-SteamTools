@@ -1,0 +1,13 @@
+{
+        "name": "steam-vault-plugin",
+        "version": "1.0.0",
+        "description": "Steam Vault - Backup e Restauração para Millennium",
+        "main": "dist/index.js",
+        "scripts": {
+                "build": "tsc",
+                "dev": "tsc --watch"
+        },
+        "devDependencies": {
+                "typescript": "^5.3.0"
+        }
+}
