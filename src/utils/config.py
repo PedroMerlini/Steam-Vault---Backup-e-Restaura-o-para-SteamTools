@@ -2,19 +2,22 @@ import json
 import os
 import sys
 
-# Importar winreg apenas no Windows
 if sys.platform == 'win32':
     import winreg
 
-CONFIG_FILE = "vault_config.json"
+def _config_path():
+    if getattr(sys, "frozen", False):
+        docs = os.path.join(os.path.expanduser("~"), "Documents", "SteamVault")
+        return os.path.join(docs, "vault_config.json")
+    return "vault_config.json"
+
+CONFIG_FILE = _config_path()
 DEFAULT_CONFIG = {"steam_path": "", "backup_path": ""}
 
 class ConfigManager:
     @staticmethod
     def detect_steam_path():
-        """Tenta detectar o caminho da Steam via Registro (Win) ou caminhos padrao (Win/Linux)."""
         
-        # 1. Tentar Registro do Windows (Apenas Windows)
         if sys.platform == 'win32':
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
@@ -25,7 +28,6 @@ class ConfigManager:
             except Exception:
                 pass
             
-        # 2. Tentar caminhos padrao (Windows e Linux)
         common_paths = []
         
         if sys.platform == 'win32':
@@ -35,12 +37,12 @@ class ConfigManager:
                 r"D:\Steam",
                 r"E:\Steam"
             ]
-        else: # Linux / MacOS
+        else:
             home = os.path.expanduser("~")
             common_paths = [
                 os.path.join(home, ".steam", "steam"),
                 os.path.join(home, ".local", "share", "Steam"),
-                os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".steam", "steam") # Flatpak
+                os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".steam", "steam")
             ]
 
         for p in common_paths:
@@ -53,7 +55,6 @@ class ConfigManager:
     def load():
         config = DEFAULT_CONFIG.copy()
         
-        # Detectar path se nao tiver salvo
         detected_steam = ConfigManager.detect_steam_path()
         if detected_steam:
             config["steam_path"] = detected_steam
@@ -62,12 +63,10 @@ class ConfigManager:
             with open(CONFIG_FILE, 'r') as f:
                 try:
                     loaded = json.load(f)
-                    # Merge: usa o salvo, senao usa o detectado (se o salvo estiver vazio)
                     saved_path = loaded.get("steam_path", "")
                     if saved_path:
                         config["steam_path"] = saved_path
                     
-                    # Carregar outros campos
                     config["backup_path"] = loaded.get("backup_path", config["backup_path"])
                     
                     return config
@@ -78,5 +77,9 @@ class ConfigManager:
 
     @staticmethod
     def save(data):
-        with open(CONFIG_FILE, 'w') as f:
+        path = CONFIG_FILE
+        folder = os.path.dirname(path)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+        with open(path, 'w') as f:
             json.dump(data, f, indent=4)
